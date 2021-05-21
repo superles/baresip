@@ -9,13 +9,18 @@ jobs:
     strategy:
       matrix:
         compiler: [gcc, clang]
+        macos_target: ["10.10", "10.15"]
         os: [ubuntu-18.04, ubuntu-20.04, macos-latest]
         exclude:
            - os: macos-latest
              compiler: gcc
+           - os: ubuntu-18.04
+             macos_target: "10.15"
+           - os: ubuntu-20.04
+             macos_target: "10.15"
     env:
       CC: ${{ matrix.compiler }}
-      MACOSX_DEPLOYMENT_TARGET: "10.10"
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
 
     steps:
     - uses: actions/checkout@v2
