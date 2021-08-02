@@ -1,0 +1,194 @@
+/**
+ * @file aumix.c N-1 audio source and play (e.g. for centralized conferences)
+ *
+ * Copyright (C) 2021 Sebastian Reimers
+ */
+#include <re.h>
+#include <rem.h>
+#include <baresip.h>
+
+enum { PTIME = 20, SRATE = 48000, CH = 2 };
+
+static struct ausrc *ausrc;
+static struct list auplayl;
+static struct auplay *auplay;
+static struct aumix *aumix;
+
+struct ausrc_st {
+	struct ausrc_prm prm;
+	ausrc_read_h *rh;
+	struct auplay_st *st_play;
+	void *arg;
+};
+
+struct auplay_st {
+	struct le le;
+	struct auplay_prm prm;
+	auplay_write_h *wh;
+	int16_t *sampv;
+	struct aumix_source *aumix_src;
+	struct ausrc_st *st_src;
+	void *arg;
+	uint64_t ts;
+};
+
+
+static void mix_handler(const int16_t *sampv, size_t sampc, void *arg)
+{
+	struct auplay_st *st_play = arg;
+	struct auframe af;
+
+	auframe_init(&af, st_play->st_src->prm.fmt, (int16_t *)sampv, sampc,
+		     st_play->st_src->prm.srate, st_play->prm.ch);
+	af.timestamp = st_play->ts;
+	st_play->st_src->rh(&af, st_play->st_src->arg);
+
+	auframe_init(&af, st_play->prm.fmt, st_play->sampv, sampc,
+		     st_play->prm.srate, st_play->prm.ch);
+	af.timestamp = st_play->ts;
+	st_play->wh(&af, st_play->arg);
+
+	aumix_source_put(st_play->aumix_src, st_play->sampv, sampc);
+
+	st_play->ts += PTIME * 1000;
+}
+
+
+static void ausrc_destructor(void *arg)
+{
+	struct ausrc_st *st = arg;
+	aumix_source_enable(st->st_play->aumix_src, false);
+}
+
+
+static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
+		     struct media_ctx **ctx, struct ausrc_prm *prm,
+		     const char *device, ausrc_read_h *rh, ausrc_error_h *errh,
+		     void *arg)
+{
+	struct ausrc_st *st;
+	struct le *le;
+	(void)ctx;
+	(void)errh;
+	(void)device;
+
+	if (!stp || !as || !prm)
+		return EINVAL;
+
+	st = mem_zalloc(sizeof(*st), ausrc_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->prm = *prm;
+	st->rh	= rh;
+	st->arg = arg;
+
+	for (le = list_head(&auplayl); le; le = le->next) {
+		struct auplay_st *st_play = le->data;
+
+		/* compare struct audio arg */
+		if (st->arg == st_play->arg) {
+			st_play->st_src = st;
+			st->st_play = st_play;
+
+			aumix_source_enable(st_play->aumix_src, true);
+			break;
+		}
+	}
+
+	*stp = st;
+
+	return 0;
+}
+
+
+static void auplay_destructor(void *arg)
+{
+	struct auplay_st *st = arg;
+
+	mem_deref(st->aumix_src);
+	mem_deref(st->sampv);
+	list_unlink(&st->le);
+}
+
+
+static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
+		      struct auplay_prm *prm, const char *device,
+		      auplay_write_h *wh, void *arg)
+{
+	struct auplay_st *st;
+	int err;
+	(void)device;
+
+	if (!stp || !ap || !prm)
+		return EINVAL;
+
+	st = mem_zalloc(sizeof(*st), auplay_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->sampv = mem_zalloc((SRATE * CH * PTIME / 1000) * sizeof(int16_t),
+			       NULL);
+	if (!st->sampv) {
+		err = ENOMEM;
+		goto out;
+	}
+
+	st->prm = *prm;
+	st->wh	= wh;
+	st->arg = arg;
+
+	err = aumix_source_alloc(&st->aumix_src, aumix, mix_handler, st);
+	if (err)
+		goto out;
+
+	list_append(&auplayl, &st->le, st);
+
+
+out:
+	if (err)
+		mem_deref(st);
+	else
+		*stp = st;
+
+	return err;
+}
+
+
+static int module_init(void)
+{
+	int err;
+
+	err = ausrc_register(&ausrc, baresip_ausrcl(), "aumix", src_alloc);
+	IF_ERR_GOTO_OUT(err);
+
+	err = auplay_register(&auplay, baresip_auplayl(), "aumix", play_alloc);
+	IF_ERR_GOTO_OUT(err)
+
+	err = aumix_alloc(&aumix, SRATE, CH, PTIME);
+	IF_ERR_GOTO_OUT(err);
+
+	list_init(&auplayl);
+
+out:
+	return err;
+}
+
+
+static int module_close(void)
+{
+	ausrc  = mem_deref(ausrc);
+	auplay = mem_deref(auplay);
+	aumix  = mem_deref(aumix);
+	list_flush(&auplayl);
+
+	return 0;
+}
+
+
+EXPORT_SYM const struct mod_export DECL_EXPORTS(aumix) = {
+	"aumix",
+	"audio",
+	module_init,
+	module_close,
+};

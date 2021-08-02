@@ -286,7 +286,7 @@ MODULES   += mixminus
 MODULES   += multicast
 
 ifneq ($(HAVE_PTHREAD),)
-MODULES   += aubridge aufile ausine
+MODULES   += aubridge aufile ausine aumix
 endif
 
 endif
