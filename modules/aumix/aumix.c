@@ -9,12 +9,14 @@
 
 enum { PTIME = 20, SRATE = 48000, CH = 2 };
 
+static struct auplay *auplay;
 static struct ausrc *ausrc;
 static struct list auplayl;
-static struct auplay *auplay;
+static struct list ausrcl;
 static struct aumix *aumix;
 
 struct ausrc_st {
+	struct le le;
 	struct ausrc_prm prm;
 	ausrc_read_h *rh;
 	struct auplay_st *st_play;
@@ -57,7 +59,9 @@ static void mix_handler(const int16_t *sampv, size_t sampc, void *arg)
 static void ausrc_destructor(void *arg)
 {
 	struct ausrc_st *st = arg;
-	aumix_source_enable(st->st_play->aumix_src, false);
+	if (st->st_play && st->st_play->aumix_src)
+		aumix_source_enable(st->st_play->aumix_src, false);
+	list_unlink(&st->le);
 }
 
 
@@ -83,6 +87,7 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	st->rh	= rh;
 	st->arg = arg;
 
+	/* setup if auplay is started before ausrc */
 	for (le = list_head(&auplayl); le; le = le->next) {
 		struct auplay_st *st_play = le->data;
 
@@ -95,6 +100,8 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 			break;
 		}
 	}
+
+	list_append(&ausrcl, &st->le, st);
 
 	*stp = st;
 
@@ -118,6 +125,7 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 {
 	struct auplay_st *st;
 	int err;
+	struct le *le;
 	(void)device;
 
 	if (!stp || !ap || !prm)
@@ -142,8 +150,21 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 	if (err)
 		goto out;
 
-	list_append(&auplayl, &st->le, st);
+	/* setup if ausrc is started before auplay */
+	for (le = list_head(&ausrcl); le; le = le->next) {
+		struct ausrc_st *st_src = le->data;
 
+		/* compare struct audio arg */
+		if (st->arg == st_src->arg) {
+			st_src->st_play = st;
+			st->st_src = st_src;
+
+			aumix_source_enable(st->aumix_src, true);
+			break;
+		}
+	}
+
+	list_append(&auplayl, &st->le, st);
 
 out:
 	if (err)
@@ -169,6 +190,7 @@ static int module_init(void)
 	IF_ERR_GOTO_OUT(err);
 
 	list_init(&auplayl);
+	list_init(&ausrcl);
 
 out:
 	return err;
@@ -181,6 +203,7 @@ static int module_close(void)
 	auplay = mem_deref(auplay);
 	aumix  = mem_deref(aumix);
 	list_flush(&auplayl);
+	list_flush(&ausrcl);
 
 	return 0;
 }
