@@ -21,6 +21,7 @@ struct ausrc_st {
 	ausrc_read_h *rh;
 	struct auplay_st *st_play;
 	void *arg;
+	const char *device;
 };
 
 struct auplay_st {
@@ -32,6 +33,7 @@ struct auplay_st {
 	struct ausrc_st *st_src;
 	void *arg;
 	uint64_t ts;
+	const char *device;
 };
 
 
@@ -74,7 +76,6 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	struct le *le;
 	(void)ctx;
 	(void)errh;
-	(void)device;
 
 	if (!stp || !as || !prm)
 		return EINVAL;
@@ -86,6 +87,7 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	st->prm = *prm;
 	st->rh	= rh;
 	st->arg = arg;
+	st->device = device;
 
 	/* setup if auplay is started before ausrc */
 	for (le = list_head(&auplayl); le; le = le->next) {
@@ -96,7 +98,7 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 			st_play->st_src = st;
 			st->st_play = st_play;
 
-			aumix_source_enable(st_play->aumix_src, true);
+			// aumix_source_enable(st_play->aumix_src, true);
 			break;
 		}
 	}
@@ -126,7 +128,6 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 	struct auplay_st *st;
 	int err;
 	struct le *le;
-	(void)device;
 
 	if (!stp || !ap || !prm)
 		return EINVAL;
@@ -145,6 +146,7 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 	st->prm = *prm;
 	st->wh	= wh;
 	st->arg = arg;
+	st->device = device;
 
 	err = aumix_source_alloc(&st->aumix_src, aumix, mix_handler, st);
 	if (err)
@@ -159,7 +161,7 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 			st_src->st_play = st;
 			st->st_src = st_src;
 
-			aumix_source_enable(st->aumix_src, true);
+			// aumix_source_enable(st->aumix_src, true);
 			break;
 		}
 	}
@@ -174,6 +176,50 @@ out:
 
 	return err;
 }
+
+
+/* aumix_enable device,true/false */
+static int source_enable(struct re_printf *pf, void *arg)
+{
+	struct cmd_arg *carg = arg;
+	struct le *le;
+	struct pl r, device = pl_null, enable_pl = pl_null;
+	bool enable;
+	int err;
+
+	pl_set_str(&r, carg->prm);
+	err = re_regex(r.p, r.l, "[^,]+,[~]*", &device, &enable_pl);
+	IF_ERR_RETURN(err);
+
+	str_bool(&enable, enable_pl.p);
+
+	info("aumix_enable %r %d", device, enable);
+
+	LIST_FOREACH(&auplayl, le) {
+		struct auplay_st *st = le->data;
+		if (!str_cmp(st->device, device.p))
+			continue;
+		if (enable)
+			aumix_source_enable(st->aumix_src, true);
+		else 
+			aumix_source_enable(st->aumix_src, false);
+	}
+
+	return err;
+}
+
+
+static int mix_debug(struct re_printf *pf, void *arg)
+{
+	(void)arg;
+
+}
+
+
+static const struct cmd cmdv[] = {
+	{"aumix_enable", 0, CMD_PRM, "Enable/Disable aumix source", source_enable},
+	{"aumix_debug", 'z', 0, "Debug aumix", mix_debug}
+};
 
 
 static int module_init(void)
