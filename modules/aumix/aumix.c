@@ -189,12 +189,16 @@ static int source_enable(struct re_printf *pf, void *arg)
 	err = re_regex(r.p, r.l, "[^,]+,[~]*", &device, &enable_pl);
 	IF_ERR_RETURN(err);
 
+
 	str_bool(&enable, enable_pl.p);
 
 	LIST_FOREACH(&auplayl, le)
 	{
 		struct auplay_st *st = le->data;
-		if (str_cmp(st->device, device.p))
+		struct pl st_device  = pl_null;
+
+		pl_set_str(&st_device, st->device);
+		if (pl_cmp(&st_device, &device))
 			continue;
 
 		info("aumix_enable %r %d\n", &device, enable);
