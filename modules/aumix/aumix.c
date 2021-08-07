@@ -191,11 +191,10 @@ static int source_enable(struct re_printf *pf, void *arg)
 
 	str_bool(&enable, enable_pl.p);
 
-
 	LIST_FOREACH(&auplayl, le)
 	{
 		struct auplay_st *st = le->data;
-		if (!str_cmp(st->device, device.p))
+		if (str_cmp(st->device, device.p))
 			continue;
 
 		info("aumix_enable %r %d\n", &device, enable);
