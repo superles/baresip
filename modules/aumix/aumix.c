@@ -199,12 +199,7 @@ static int source_enable(struct re_printf *pf, void *arg)
 			continue;
 
 		info("aumix_enable %r %d\n", &device, enable);
-
-		if (enable)
-			aumix_source_enable(st->aumix_src, true);
-		else
-			aumix_source_enable(st->aumix_src, false);
-
+		aumix_source_enable(st->aumix_src, enable);
 		st->enabled = enable;
 	}
 
