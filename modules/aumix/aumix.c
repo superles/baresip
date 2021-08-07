@@ -86,10 +86,11 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	if (!st)
 		return ENOMEM;
 
-	st->prm	   = *prm;
-	st->rh	   = rh;
-	st->arg	   = arg;
-	st->device = device;
+	st->prm	    = *prm;
+	st->rh	    = rh;
+	st->arg	    = arg;
+	st->device  = device;
+	st->enabled = false;
 
 	/* setup if auplay is started before ausrc */
 	for (le = list_head(&auplayl); le; le = le->next) {
@@ -143,10 +144,11 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 		goto out;
 	}
 
-	st->prm	   = *prm;
-	st->wh	   = wh;
-	st->arg	   = arg;
-	st->device = device;
+	st->prm	    = *prm;
+	st->wh	    = wh;
+	st->arg	    = arg;
+	st->device  = device;
+	st->enabled = false;
 
 	err = aumix_source_alloc(&st->aumix_src, aumix, mix_handler, st);
 	if (err)
@@ -161,7 +163,7 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 			st_src->st_play = st;
 			st->st_src	= st_src;
 
-			/* start audio if src started/enabled before play */
+			/* start aumix if ausrc enabled before auplay */
 			if (st_src->enabled) {
 				aumix_source_enable(st->aumix_src, true);
 				st->enabled = true;
@@ -212,6 +214,7 @@ static int source_enable(struct re_printf *pf, void *arg)
 		st->enabled = enable;
 	}
 
+	/* Fallback if auplay is not started yet */
 	LIST_FOREACH(&ausrcl, le)
 	{
 		struct ausrc_st *st = le->data;
