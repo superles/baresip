@@ -22,6 +22,7 @@ struct ausrc_st {
 	struct auplay_st *st_play;
 	void *arg;
 	const char *device;
+	bool enabled;
 };
 
 struct auplay_st {
@@ -159,6 +160,12 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 		if (st->arg == st_src->arg) {
 			st_src->st_play = st;
 			st->st_src	= st_src;
+
+			/* start audio if src started/enabled before play */
+			if (st_src->enabled) {
+				aumix_source_enable(st->aumix_src, true);
+				st->enabled = true;
+			}
 			break;
 		}
 	}
@@ -189,7 +196,6 @@ static int source_enable(struct re_printf *pf, void *arg)
 	err = re_regex(r.p, r.l, "[^,]+,[~]*", &device, &enable_pl);
 	IF_ERR_RETURN(err);
 
-
 	str_bool(&enable, enable_pl.p);
 
 	LIST_FOREACH(&auplayl, le)
@@ -203,6 +209,18 @@ static int source_enable(struct re_printf *pf, void *arg)
 
 		info("aumix_enable %r %d\n", &device, enable);
 		aumix_source_enable(st->aumix_src, enable);
+		st->enabled = enable;
+	}
+
+	LIST_FOREACH(&ausrcl, le)
+	{
+		struct ausrc_st *st = le->data;
+		struct pl st_device = pl_null;
+
+		pl_set_str(&st_device, st->device);
+		if (pl_cmp(&st_device, &device))
+			continue;
+
 		st->enabled = enable;
 	}
 
