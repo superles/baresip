@@ -22,7 +22,7 @@ struct ausrc_st {
 	struct auplay_st *st_play;
 	void *arg;
 	const char *device;
-	bool enabled;
+	bool muted;
 };
 
 struct auplay_st {
@@ -35,7 +35,7 @@ struct auplay_st {
 	void *arg;
 	uint64_t ts;
 	const char *device;
-	bool enabled;
+	bool muted;
 };
 
 
@@ -43,6 +43,9 @@ static void mix_handler(const int16_t *sampv, size_t sampc, void *arg)
 {
 	struct auplay_st *st_play = arg;
 	struct auframe af;
+
+	if (!st_play->st_src)
+		return;
 
 	auframe_init(&af, st_play->st_src->prm.fmt, (int16_t *)sampv, sampc,
 		     st_play->st_src->prm.srate, st_play->prm.ch);
@@ -86,11 +89,11 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	if (!st)
 		return ENOMEM;
 
-	st->prm	    = *prm;
-	st->rh	    = rh;
-	st->arg	    = arg;
-	st->device  = device;
-	st->enabled = false;
+	st->prm	   = *prm;
+	st->rh	   = rh;
+	st->arg	   = arg;
+	st->device = device;
+	st->muted  = true;
 
 	/* setup if auplay is started before ausrc */
 	for (le = list_head(&auplayl); le; le = le->next) {
@@ -100,6 +103,12 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 		if (st->arg == st_play->arg) {
 			st_play->st_src = st;
 			st->st_play	= st_play;
+
+			if (!st_play->muted) {
+				st->muted = false;
+			}
+			aumix_source_mute(st_play->aumix_src, st->muted);
+			aumix_source_enable(st_play->aumix_src, true);
 			break;
 		}
 	}
@@ -144,11 +153,11 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 		goto out;
 	}
 
-	st->prm	    = *prm;
-	st->wh	    = wh;
-	st->arg	    = arg;
-	st->device  = device;
-	st->enabled = false;
+	st->prm	   = *prm;
+	st->wh	   = wh;
+	st->arg	   = arg;
+	st->device = device;
+	st->muted  = true;
 
 	err = aumix_source_alloc(&st->aumix_src, aumix, mix_handler, st);
 	if (err)
@@ -163,11 +172,11 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 			st_src->st_play = st;
 			st->st_src	= st_src;
 
-			/* start aumix if ausrc enabled before auplay */
-			if (st_src->enabled) {
-				aumix_source_enable(st->aumix_src, true);
-				st->enabled = true;
+			if (!st_src->muted) {
+				st->muted = false;
 			}
+			aumix_source_mute(st->aumix_src, st->muted);
+			aumix_source_enable(st->aumix_src, true);
 			break;
 		}
 	}
@@ -184,21 +193,20 @@ out:
 }
 
 
-/* aumix_enable device,true/false */
-static int source_enable(struct re_printf *pf, void *arg)
+static int source_mute(struct re_printf *pf, void *arg)
 {
 	struct cmd_arg *carg = arg;
 	struct le *le;
-	struct pl r, device = pl_null, enable_pl = pl_null;
-	bool enable;
+	struct pl r, device = pl_null, mute_pl = pl_null;
+	bool mute;
 	int err;
 	(void)pf;
 
 	pl_set_str(&r, carg->prm);
-	err = re_regex(r.p, r.l, "[^,]+,[~]*", &device, &enable_pl);
+	err = re_regex(r.p, r.l, "[^,]+,[~]*", &device, &mute_pl);
 	IF_ERR_RETURN(err);
 
-	str_bool(&enable, enable_pl.p);
+	str_bool(&mute, mute_pl.p);
 
 	LIST_FOREACH(&auplayl, le)
 	{
@@ -209,9 +217,9 @@ static int source_enable(struct re_printf *pf, void *arg)
 		if (pl_cmp(&st_device, &device))
 			continue;
 
-		info("aumix_enable %r %d\n", &device, enable);
-		aumix_source_enable(st->aumix_src, enable);
-		st->enabled = enable;
+		info("aumix_mute %r %d\n", &device, mute);
+		aumix_source_mute(st->aumix_src, mute);
+		st->muted = mute;
 	}
 
 	/* Fallback if auplay is not started yet */
@@ -224,7 +232,7 @@ static int source_enable(struct re_printf *pf, void *arg)
 		if (pl_cmp(&st_device, &device))
 			continue;
 
-		st->enabled = enable;
+		st->muted = mute;
 	}
 
 	return err;
@@ -241,7 +249,7 @@ static int mix_debug(struct re_printf *pf, void *arg)
 	{
 		struct auplay_st *st = le->data;
 
-		info("aumix: %s, enabled: %d\n", st->device, st->enabled);
+		info("aumix: %s, muted: %d\n", st->device, st->muted);
 	}
 
 	return 0;
@@ -249,8 +257,8 @@ static int mix_debug(struct re_printf *pf, void *arg)
 
 
 static const struct cmd cmdv[] = {
-	{"aumix_enable", 0, CMD_PRM, "aumix_enable <device>,<true,false>}",
-	 source_enable},
+	{"aumix_mute", 0, CMD_PRM, "aumix_mute <device>,<true,false>}",
+	 source_mute},
 	{"aumix_debug", 'z', 0, "Debug aumix", mix_debug}};
 
 
