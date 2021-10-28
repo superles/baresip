@@ -12,7 +12,7 @@ jobs:
         macos_target: ["10.10", "11.0"]
         os: [ubuntu-18.04, ubuntu-20.04, macos-11]
         exclude:
-           - os: macos-latest
+           - os: macos-11
              compiler: gcc
            - os: ubuntu-18.04
              macos_target: "11.0"
